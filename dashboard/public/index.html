@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart City Traffic Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      .blink {
+        animation: blinker 1s linear infinite;
+      }
+      @keyframes blinker {
+        50% {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 font-sans text-gray-800">
+    <div class="min-h-screen flex flex-col">
+      <!-- Header -->
+      <header
+        class="bg-indigo-600 text-white shadow-md p-4 flex justify-between items-center"
+      >
+        <h1 class="text-2xl font-bold flex items-center gap-2">
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            ></path>
+          </svg>
+          Smart City Traffic Dashboard
+        </h1>
+        <div class="flex items-center gap-2">
+          <span class="relative flex h-3 w-3">
+            <span
+              class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
+            ></span>
+            <span
+              class="relative inline-flex rounded-full h-3 w-3 bg-green-500"
+            ></span>
+          </span>
+          <span class="text-sm font-medium">Live System Active</span>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Left Column: Real-time & Alerts -->
+        <div class="space-y-6">
+          <!-- Live Traffic Widget -->
+          <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-lg font-semibold border-b pb-2 mb-4">
+              Latest Sensor Readings
+            </h2>
+            <div id="live-traffic-container" class="space-y-3">
+              <p class="text-sm text-gray-500">Loading live data...</p>
+            </div>
+          </div>
+
+          <!-- Critical Alerts Widget -->
+          <div class="bg-white rounded-lg shadow p-5 border-t-4 border-red-500">
+            <h2
+              class="text-lg font-semibold border-b pb-2 mb-4 text-red-600 flex items-center gap-2"
+            >
+              <svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                ></path>
+              </svg>
+              Recent Critical Alerts
+            </h2>
+            <div class="max-h-60 overflow-y-auto">
+              <ul id="alerts-container" class="space-y-2 text-sm">
+                <li class="text-gray-500">No alerts yet...</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Middle/Right Column: Analytics & Police Deployment -->
+        <div class="lg:col-span-2 space-y-6">
+          <!-- Analytics Chart -->
+          <div class="bg-white rounded-lg shadow p-5">
+            <h2
+              class="text-lg font-semibold border-b pb-2 mb-4 relative flex justify-between"
+            >
+              <span>Traffic Volume by Hour (Today)</span>
+              <select
+                id="chart-junction-filter"
+                class="text-sm border rounded px-2 py-1 outline-none"
+              >
+                <option value="ALL">All Junctions</option>
+              </select>
+            </h2>
+            <div class="relative h-64 w-full">
+              <canvas id="volumeChart"></canvas>
+            </div>
+          </div>
+
+          <!-- Police Deployment Recommendations -->
+          <div class="bg-white rounded-lg shadow p-5">
+            <h2 class="text-lg font-semibold border-b pb-2 mb-4">
+              Nightly Police Deployment Strategy
+            </h2>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-gray-50 text-gray-700">
+                    <th class="py-2 px-3 border-b text-sm font-medium">
+                      Junction
+                    </th>
+                    <th class="py-2 px-3 border-b text-sm font-medium">
+                      Peak Hour
+                    </th>
+                    <th class="py-2 px-3 border-b text-sm font-medium">
+                      Peak Vol
+                    </th>
+                    <th class="py-2 px-3 border-b text-sm font-medium">
+                      Avg Speed (km/h)
+                    </th>
+                    <th class="py-2 px-3 border-b text-sm font-medium">
+                      Alerts
+                    </th>
+                    <th class="py-2 px-3 border-b text-sm font-medium">
+                      Score
+                    </th>
+                    <th class="py-2 px-3 border-b text-sm font-medium w-32">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="deployment-tbody" class="text-sm">
+                  <tr>
+                    <td colspan="7" class="py-4 text-center text-gray-500">
+                      Processing data...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="dash.js"></script>
+  </body>
+</html>

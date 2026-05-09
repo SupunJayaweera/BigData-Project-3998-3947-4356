@@ -1,0 +1,1 @@
+id,sensor_id,window_start,window_end,total_vehicle_count,avg_speed_window,congestion_index,is_congested,computed_at
