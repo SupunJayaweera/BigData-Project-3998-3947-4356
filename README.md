@@ -11,67 +11,134 @@ Madhushan K. K. S. - EG/2020/4356
 
 ---
 
-## 1. Introduction
+## 1 INTRODUCTION
 
-The Smart City Traffic & Congestion Pipeline is a robust, scaleable data processing architecture built to ingest, analyze, and store real-time telemetry from intersection sensors. By implementing a Lambda Architecture approach, the system seamlessly serves both ultra-low-latency alerting for urgent traffic incidents and deep batch-analytics for overnight decision-making. The real-time aspect ensures that immediate traffic anomalies (e.g., sudden massive decelerations below $10.0$ km/h) trigger operational visibility, while the historical analysis feeds strategic decision-making such as overnight policing schedules and long-term infrastructural improvements.
+This project implements a comprehensive Smart City Traffic management pipeline following a Lambda architecture pattern that combines real-time stream processing with scheduled batch analytics. The system monitors vehicle volumes and speeds in real-time across multiple city junctions, detecting critical traffic jams while maintaining accurate historical aggregations to guide daily police deployments.
 
-## 2. Technology Stack Justification
+The pipeline architecture includes:
 
-### 2.1 Apache Kafka
+- **Ingestion Layer:** Python traffic generator producing realistic IoT sensor telemetry.
+- **Streaming Layer:** Apache Kafka for high-throughput event distribution; Apache Spark Structured Streaming for real-time congestion indexing and critical alert generation (speed < 10 km/h).
+- **Real-Time Alerts & UI:** Immediate flagging of critical conditions to PostgreSQL, surfaced instantaneously on a Live JavaScript Dashboard.
+- **Batch Processing Layer:** Apache Airflow orchestrating scheduled ETL jobs nightly to extract, aggregate, and warehouse traffic patterns.
+- **Analytics Layer:** CSV-based data exports featuring Traffic Volume by Hour charts and Police Deployment Strategies.
 
-Apache Kafka was selected as the ingestion backbone due to its exceptional throughput, horizontal scaleability, and persistence via topic partitioning. Sensor endpoints emit telemetry at high frequencies. Rather than hammering a transactional database or API endpoint linearly, Kafka buffers these writes optimally. We separated data structurally by allocating a 4-partition topic for `traffic-raw` normal telemetry and an isolated 1-partition topic for `traffic-critical` events, enabling decoupled downstream consumption and independent retention policies.
+This report documents the complete architecture, technology justifications, event-time handling semantics, batch orchestration, and the ethical data governance considerations required for a production-grade civic monitoring system.
 
-### 2.2 Apache Spark Structured Streaming
+---
 
-Spark Structured Streaming was chosen over alternative streaming engines (like Storm or Flink) primarily due to its unified batch and streaming API. It allows our pipeline to execute windowed calculations continuously against streaming data streams using the identical SQL/Dataframe syntaxes that we would employ on static datasets. Furthermore, its native handling of event-time semantics, watermarking, and fault-tolerance (via checkpointing) makes calculating accurate traffic congestion matrices exceptionally resilient to worker node failures constraints.
+## 2 SYSTEM OVERVIEW & ARCHITECTURE
 
-### 2.3 PostgreSQL
+The traffic monitoring pipeline implements a Lambda architecture combining real-time and batch processing paths:
 
-PostgreSQL provides robust relational data persistence that natively accommodates time-series nuances. Since our batch operations require intricate groupings (hourly aggregations, temporal sorting), having a true SQL engine allows us to drastically condense downstream API requirements. Crucially, the requirement to isolate event occurrences across global temporal shifts necessitated PostgreSQL's `TIMESTAMPTZ` data types. This natively differentiates between arbitrary server timestamps and actual sensor event origination times automatically.
+![Architecture Diagram](assets/diagram.png)
 
-### 2.4 Apache Airflow
+**Architecture Components:**
 
-To orchestrate the generation of nightly reports consistently without relying on host-level `cron` daemons, we integrated Apache Airflow into the stack. Airflow explicitly enables Directed Acyclic Graphs (DAGs) which map out our workflow: trigger, collect Postgres telemetry, serialize to CSV, and export locally. Its resilience, automatic retry paradigms on task failure, and the visibility of task executions via the Airflow Web UI make batch operational diagnostics profoundly easier for an operations team.
+- **Data Source Layer:** Traffic generator simulating sensors from 4 junctions, producing JSON records with fields: `sensor_id`, `event_time`, `vehicle_count`, `avg_speed`.
+- **Event Ingestion Layer:** Apache Kafka distributes incoming telemetry across the `traffic-raw` topic, enabling resilient data buffering and decoupling.
+- **Stream Processing Layer (Speed Path):** Apache Spark Structured Streaming applies windowed calculations and filters with event-time awareness and watermarking (10-minute lateness tolerance). It calculates a Congestion Index over 5-minute tumbling windows and traps sudden speed drops.
+- **Real-Time Persistence Layer:** Streaming outputs are written to PostgreSQL (`sensor_readings`, `critical_alerts`, and `congestion_windows`) via JDBC `foreachBatch` operations.
+- **Live Dashboard Layer:** A Flask-backed Node/JS dashboard queries PostgreSQL to render live metrics, alerts, and interactive Chart.js graphs mapping traffic volume vs. time of day.
+- **Batch Processing Layer (Batch Path):** Apache Airflow orchestrates a scheduled DAG (`traffic_report_dag.py`) running nightly at 23:00 to query the database, ensuring zero-loss end-of-day analytics.
+- **Analytics Storage Layer:** Exported static CSV files placed in the `reports/` folder format the insights for urban planners and traffic management operators.
 
-## 3. Event Time vs. Processing Time
+---
 
-Differentiating between _Event Time_ and _Processing Time_ is paramount in stream processing architectures. **Event time** references the exact moment the vehicle crossed the sensor (encoded within the simulated payload natively). **Processing time** references the moment the Spark execution or downstream service actually processes/inserts the data.
+## 3 TOOLS & TECHNOLOGIES JUSTIFICATION
 
-Our pipeline strictly honors event-time. It parses the JSON timestamp payload, applies a native Spark watermark of 10 minutes (`withWatermark("event_time", "10 minutes")`), and performs windowed calculations grouped inherently by this event time.
+- **Apache Kafka:** Enables high-throughput ingestion of granular IoT data. Topic partitioning distributes the load, while persistent offset tracking guarantees no sensor readings are lost even during downstream maintenance.
+- **Apache Spark Structured Streaming:** Chosen over native Storm or Flink due to its unified batch and stream API. Windowing natively supports temporal aggregations (e.g., "5-minute block averages"), while micro-batching provides robust exactly-once semantics.
+- **PostgreSQL:** Relational databases natively accommodate time-series grouping via `TIMESTAMPTZ` data types. It concurrently supports heavy streaming inserts and dynamic dashboard read queries.
+- **Apache Airflow:** Orchestrates end-of-day reports systematically. The DAG structure with automatic retry configurations guarantees analytical reports are dependably generated even if temporary network failures occur.
+- **JavaScript/Chart.js & Flask:** Provides an immediately understandable visual interface for civic authorities to monitor traffic spikes and police deployment rankings without writing SQL.
 
-If we utilized pure processing time, any system latency (such as temporary Kafka ingestion outages, slow container reboots, or network congestion) would artificially distort the Congestion Index by blending delayed historical inputs with current intersection traffic. By watermarking and aggregating strictly against the emitted timestamp, we ensure congestion analytics perfectly reflect reality.
+---
 
-## 4. Pipeline Architecture Overview
+## 4 REAL-TIME STREAM PROCESSING LOGIC
 
-The system operates across distinct phases:
+Two core processing schemas operate with event-time awareness:
 
-1. **Producer**: Python script generating intersection counts every second.
-2. **Kafka Message Broker**: Captures the raw sensor payload instantly.
-3. **Spark Master/Worker**: Continuously consumes the `traffic-raw` topic. It executes real-time `.filter` constraints for critical alerts (speed $< 10.0$ km/h), calculates a Congestion Index over tumbling 5-minute event-time windows, and pushes batches directly to PostgreSQL using `foreachBatch` logic.
-4. **PostgreSQL**: Sinks all data locally.
-5. **Analytics Dashboard**: Parses the real-time data back upward dynamically into a Javascript GUI using a Node/Python micro-server API.
-6. **Airflow Server**: Every day at 23:00, Airflow captures the entirety of `sensor_readings`, `critical_alerts`, and `congestion_windows` corresponding strictly to `CURRENT_DATE` logic, exporting them flawlessly to daily mounted CSV flat files.
+- **Rule 1 - Critical Anomalies (Alerts):** Any sensor reporting an average speed below 10.0 km/h triggers an immediate critical alert route to PostgreSQL.
 
-## 5. Ethics & Data Governance
+```python
+alerts = parsed.filter(col("avg_speed") < lit(10.0)).select(
+    col("sensor_id"), col("event_time"), col("vehicle_count"), col("avg_speed")
+)
+```
 
-### 5.1 Privacy Implications
+- **Rule 2 - Congestion Indexation (Metrics):** Rolling 5-minute tumbling windows group traffic to generate a structural Congestion Index: `max(0, (vc/150) * (1 - speed/60))`.
 
-By design, our intersection data leverages macro-scale aggregations (`vehicle_count` and `avg_speed`) ensuring zero Personal Identifiable Information (PII) such as ANPR (license plates) or individual routing habits are retained. However, privacy risks still exist: heavily granular data mapping local neighborhood egress points at very specific times could hypothetically triangulate residential activity habits. Thus, data should remain inherently segmented and structurally blurred regarding highly localized intersections near residential areas.
+```python
+windowed = parsed \
+    .withWatermark("event_time", "10 minutes") \
+    .groupBy(col("sensor_id"), window(col("event_time"), "5 minutes")) \
+    .agg(...)
+```
 
-### 5.2 Data Governance Recommendations
+---
 
-The system demands a robust governance implementation. First, a strict retention TTL should be instituted terminating raw telemetry after 30 days, leaving only aggregated analytical totals. In Sri Lanka, referencing the Personal Data Protection Act (2022), if these sensors were eventually upgraded with optical/camera capabilities, the entire Postgres pipeline must shift behind strict Role-Based Access Controls (RBAC), implementing data masking on arrival and preventing raw video egress beyond the edge node. Currently, simple read-only API database roles for the analytical dashboard mitigate most manipulation risks.
+## 5 EVENT TIME VS. PROCESSING TIME
 
-### 5.3 Ethical Use
+- **Event Time:** When the sensor actually captured the traffic reading (`timestamp` payload).
+- **Processing Time:** When Spark receives and computes the message.
 
-The automated police deployment reports generate an inherently complex ethical dilemma. Because enforcement scores map strictly to congestion density, poorer neighborhoods with aging infrastructure resulting in slower traffic might trigger dramatically more "Police Deployments" purely systematically, despite lacking correlating crime statistics. Deploying policing based singularly on throughput volume effectively biases against infrastructural neglect. This risks contributing to systemic over-policing and discrimination. The generated deployment thresholds ($> 6.0\text{ score}$) should therefore solely represent traffic management/auxiliary operations—strictly not generalized enforcement scaling.
+This distinction is critical for accurate traffic mapping. Example: A severe traffic jam occurs at J1_KOLLUPITIYA at 17:00 UTC during monsoon rain. A local network outage delays the sensor transmission, and Spark receives the data at 17:15 UTC.
 
-## 6. Analytical Report: Traffic Volume vs. Time of Day
+Using _processing time_ would artificially record the traffic jam at 17:15, ruining urban planning metrics. By strictly processing via _event time_ backed by a 10-minute watermark (`.withWatermark("event_time", "10 minutes")`), Spark inherently corrects the delay and assigns the congestion to the correct 17:00 analytical window.
 
-![Dashboard Chart](assets/dash.png)
+---
+
+## 6 BATCH PROCESSING & ORCHESTRATION
+
+Scheduled batch jobs every night (23:00) extract and store traffic data. The Airflow DAG pipeline executes:
+
+1.  **Extract:** Queries `traffic_db` restricting purely to `CURRENT_DATE`.
+2.  **Transform:** Sorts anomalies chronically and organizes schema layouts.
+3.  **Load:** Iterates dynamically over `sensor_readings`, `critical_alerts`, and `congestion_windows` tables, saving data directly into persistent CSV files.
+
+**Nightly Outputs:**
+`reports/sensor_readings_YYYY-MM-DD.csv`
+`reports/congestion_windows_YYYY-MM-DD.csv`
+`reports/critical_alerts_YYYY-MM-DD.csv`
+
 ![Data Table](assets/tab.png)
 
-**Data Analysis:**
-The visualization and table above demonstrate the aggregated traffic volume plotted against the time of day across our monitored junctions. By extracting the hour from the semantic `event_time` timestamp, our Spark-PostgreSQL pipeline accurately segments temporal data regardless of processing latencies.
+---
 
-As observed, traffic scales significantly during peak transit hours. This visualization serves as a primary tool for urban planners to correlate road utilization with specific times of the day, allowing for data-driven infrastructure planning and targeted traffic police deployments.
+## 7 ANALYTICS & REPORTING OUTPUT
+
+The pipeline generates multi-tier analytic transparency:
+
+![Dashboard Chart](assets/dash.png)
+
+**Real-Time Dashboard (Visual Analytics):**
+
+- Live scrolling feed of intersection metrics.
+- Blinking localized alerts highlighting exact junctions suffering sub-10km/h collapses.
+- **Traffic Volume by Hour:** Bar chart (Chart.js) aggregating the real-time sum of vehicles mapped explicitly against the hour of the day.
+
+**Police Deployment Strategy (Reconciliation):**
+A calculated daily score combining Peak Volume, Average Speed, and Critical Alerts thresholds.
+
+- `deployment_score = volume * (1/speed) * (1 + alerts)`
+- Junctions scoring `> 6.0` actively ping a visual **"DEPLOY POLICE"** notification, optimizing severely limited municipal policing resources reliably.
+
+---
+
+## 8 ETHICS & DATA GOVERNANCE
+
+Civic telemetry requires balancing urban optimization with strict public privacy guarantees.
+
+- **Privacy Risks:** While our current sensors capture aggregate macro-data (counts/speeds), tracking junction loads can structurally map citizen neighborhood egress routines.
+- **Data Governance Safeguards:**
+  - **Data Minimization:** No license plates (ANPR) or Mac-address tracking are ingested.
+  - **Retention Limits:** Raw `sensor_readings` must be purged via database TTL after 30 days, storing only the high-level `congestion_windows` analytically.
+  - **Access Control:** Read-only PostgreSQL roles explicitly limit the Live Dashboard's surface area, preventing malicious traffic injection.
+- **Algorithm Bias & Fair Enforcement:** The "Police Deployment Algorithm" scores purely upon congestion thresholds. Poorer neighborhoods often feature deteriorated infrastructure causing inherently slower traffic. Blindly linking police deployment to "slow traffic" drastically risks systemic over-policing in neglected areas compared to wealthy districts with modern roads. Deployment metrics must therefore only guide _traffic management personnel_, not strictly armed law enforcement.
+
+---
+
+## 9 CONCLUSION
+
+The Smart City Traffic Pipeline successfully establishes a robust Lambda architecture handling real-time vehicular telemetry alongside deep batch analytics. By properly separating the Speed Path (Spark filtering Kafka inputs instantaneously for critical drops in speed) and the Batch Path (Airflow orchestrating daily CSV extraction), the solution grants city administrators unprecedented immediate visibility and dependable historical reporting. The strict integration of event-time semantics ensures deterministic accuracy despite real-world network fluctuations. Accompanied by vital privacy thresholds and bias documentation, this ecosystem acts as a scalable bedrock for modernized civic infrastructure.
