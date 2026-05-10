@@ -33,7 +33,7 @@ The traffic monitoring pipeline implements a Lambda architecture combining real-
 
 <!-- ![Architecture Diagram](assets/diagram.png) -->
 <div align="center">
-<img src="assets/diagram.png" alt="Data Table" width="500" />
+<img src="assets/diagram.png" alt="Architecture Diagram" width="500" />
 </div>
 
 **Architecture Components:**
