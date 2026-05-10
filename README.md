@@ -31,7 +31,10 @@ This report documents the complete architecture, technology justifications, even
 
 The traffic monitoring pipeline implements a Lambda architecture combining real-time and batch processing paths:
 
-![Architecture Diagram](assets/diagram.png)
+<!-- ![Architecture Diagram](assets/diagram.png) -->
+<div align="center">
+<img src="assets/diagram.png" alt="Data Table" width="500" />
+</div>
 
 **Architecture Components:**
 
